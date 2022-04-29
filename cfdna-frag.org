@@ -1,0 +1,72 @@
+* Cell-free DNA Fragmentomics Analysis :biopipe:
+:PROPERTIES:
+:header-args:bash: :tangle-mode (identity #o555)
+:logging: nil
+:END:
+** Setup
+*** Repository
+#+begin_src bash
+biotools/src/add_biorepo_dirs.sh
+#+end_src
+*** Integration testing setup
+#+begin_src bash 
+#!/usr/bin/env bash
+#########1#########2#########3#########4#########5#########6#########7#########8
+
+# Functions
+wget_std(){
+    wget \
+        --continue \
+        --execute robots=off \
+        --no-check-certificate \
+        --no-parent \
+        --output-document $2 \
+        --timestamping $1 2>> $3
+}
+
+# Snakemake variables
+params_url=$1
+output_duke_zip=$(realpath $2)
+output_duke_unzip=$(realpath $3)
+log=$(realpath $4)
+
+# Run command
+wget_std "$params_url" "$output_duke_zip" "$log"
+gunzip -c "$output_duke_zip" > "$output_duke_unzip" 2>> "$log"
+
+#+end_src
+** README
+** Integration testing :smk:
+#+begin_src snakemake
+rule all:
+    input:
+        expand(config["data_dir"] + "/frag/{library_id}_frag.bed", library_id=ALLLIB),           
+#+end_src
+** Make fragment bed files :smk:
+:PROPERTIES:
+:header-args:snakemake: :tangle ./workflow/frag_bed.smk
+:END:
+** Make normalized frag counts :smk:
+:PROPERTIES:
+:header-args:snakemake: :tangle ./workflow/frag_counts.smk
+:END:
+** Held rules
+*** Make filter bed                                                :smk_rule:
+- Snakemake
+  #+begin_src snakemake
+rule make_filter_bed:
+    input:
+        duke_bed = config["data_dir"] + "/inputs/hg19-blacklist.v2.bed",
+        mathios_bed = config["data_dir"] + "/inputs/mathios_chrom_bins.bed",
+    output:
+        keep_bed = config["data_dir"] + "/ref/keep.bed",
+    shell:
+        """
+        bedtools subtract -a {input.mathios_bed} -b {input.duke_bed} > {output.keep_bed}
+        """
+#+end_src
+- Reference
+  - https://www.nature.com/articles/s41467-021-24994-w
+  - https://www.biostars.org/p/80443/
+** Ideas
+- ggridgeplot of frag distros
