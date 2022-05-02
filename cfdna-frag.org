@@ -5,13 +5,56 @@
 :END:
 ** Setup
 *** Repository
-#+begin_src bash
+- [[id:b1c8d0f3-42aa-4427-93e0-5e97261343d5][Make bioinformatics project repository directory structure]]
+  #+begin_src bash
 biotools/src/add_biorepo_dirs.sh
 #+end_src
-*** Integration testing setup
+#+begin_src bash
+mkdir -p test/bam            
+#+end_src
+*** Git and github
+#+begin_src bash
+git init
+git add -A
+git commit -am "First commit"
+git branch -M master
+#+end_src
+#+begin_src bash
+git remote add origin git@github.com:jeszyman/cfdna-frag.git
+git branch -M master
+git push -u origin master
+#+end_src
+**** Setup [[file:config/precommit_git_hook][import size check hook]]
+#+begin_src bash :noweb yes :tangle ./config/precommit_git_hook
+<<../basecamp/basecamp.org:git_size_check_hook_wrapper()>>            
+#+end_src
+#+begin_src bash
+\rm ".git/hooks/precommit"
+
+ln -s /home/jeszyman/repos/cfdna-frag/config/precommit_git_hook /home/jeszyman/repos/cfdna-cna/.git/hooks/precommit
+
+chmod 777 .git/hooks/precommit
+
+#+end_src
+*** TODO Resources 
+
+FOR HG38 JUST USE BLACKLIST, IGNORE MAPPABILIT SCORE
+
+Mappability wig 
+Wig2bed https://bedops.readthedocs.io/en/latest/content/reference/file-management/conversion/wig2bed.html
+
+https://genome.ucsc.edu/cgi-bin/hgTables?hgsid=1343600709_h27mHfkbguw1osJvTiSMdXaTLNXF&clade=mammal&org=Human&db=hg38&hgta_group=map&hgta_track=umap&hgta_table=umap100Quantitative&hgta_regionType=range&position=chr12%3A56%2C694%2C976-56%2C714%2C605&hgta_outputType=primaryTable&hgta_outFileName=
+
+Stats vs 5mb windows- can do column counts
+
+Gc per window 
+
+Filter to new bed 
+
+- bams currently come from cfdna-cna
+- blacklists currently from https://github.com/Boyle-Lab/Blacklist/tree/master/lists
 #+begin_src bash 
 #!/usr/bin/env bash
-#########1#########2#########3#########4#########5#########6#########7#########8
 
 # Functions
 wget_std(){
@@ -35,21 +78,548 @@ wget_std "$params_url" "$output_duke_zip" "$log"
 gunzip -c "$output_duke_zip" > "$output_duke_unzip" 2>> "$log"
 
 #+end_src
+
+" To capture large-scale epigenetic differences in fragmentation across the genome estimable from low-coverage whole-genome sequencing, we tiled the hg19 reference genome into non-overlapping 5 Mb bins (Supplementary Table 12). Bins with an average GC content <0.3 and an average mappability <0.9 were excluded, leaving 473 bins spanning approximately 2.4 GB of the genome (Supplementary Table 11)."
+
+- break fasta into chroms
+- for each chrome, tile into 5 mb bins
+- for each bin, calculate GC
+- for each bin, calculate average mappability 
+- 
+*** TODO Integration testing setup
+
+*** Snakemake
+**** Configuration YAMLs
+#+begin_src bash :tangle config/repo_test.yaml
+
+#+end_src 
 ** README
 ** Integration testing :smk:
 #+begin_src snakemake
 rule all:
     input:
-        expand(config["data_dir"] + "/frag/{library_id}_frag.bed", library_id=ALLLIB),           
+        expand(config["frag_dir"] + "/{library_id}_frag.bed", library_id=["lib001","lib002"]),
+
+include "frag_bed.smk"
 #+end_src
 ** Make fragment bed files :smk:
 :PROPERTIES:
 :header-args:snakemake: :tangle ./workflow/frag_bed.smk
 :END:
+*** Smk rules
+**** Filter alignments                                             :smk_rule:
+- Snakemake
+  #+begin_src snakemake
+rule filter_alignments:
+    input:
+        bam = config["bam_dir"] + "/{library_id}.bam",
+        keep_bed = config["data_dir"] + "/ref/keep.bed",
+    params:
+        temp_dir = config["data_dir"] + "/tmp/",
+        threads = config["threads"],
+    resources:
+        mem_mb=5000
+    output:
+        filt_bam = config["data_dir"] + "/bam/{library_id}_filt.bam",
+    shell:
+        """
+        workflow/scripts/filter_alignments.sh {input.bam} \
+                                              {input.keep_bed} \
+                                              {params.temp_dir} \
+                                              {params.threads} \
+                                              {output.filt_bam}
+        """
+#+end_src
+- [[file:./workflow/scripts/filter_alignments.sh][Base script]]
+  #+begin_src bash :tangle ./workflow/scripts/filter_alignments.sh
+# Function
+filter_bams(){
+    # Filter to mapq 30 and limit to keep.bed genomic regions
+    samtools view -@ $1 -b -h -L $2 -o - -q 30 $3 | 
+    samtools sort -@ $1 -n -o $4 -T $5 -
+    }
+
+# Snakemake variables
+input_in_bam="$1"
+input_keep_bed="$2"
+params_temp_dir="$3"
+params_threads="$4"
+output_filt_bam="$5"
+
+# Run command
+filter_bams "$params_threads" "$input_keep_bed" "$input_in_bam" "$output_filt_bam" $params_temp_dir 
+#+end_src
+**** Read to frag bed                                              :smk_rule:
+- Snakemake
+  #+begin_src snakemake
+rule read_to_frag_bed:
+    input:
+        bam = config["data_dir"] + "/bam/{library_id}_filt.bam",
+    params:
+        fasta = config["data_dir"] + "/inputs/hg19.fa",
+    output:
+        frag_bed = config["data_dir"] + "/frag/{library_id}_frag.bed",
+    resources:
+        mem_mb=5000	
+    shell:
+        """
+        workflow/scripts/read_to_frag_bed.sh {input.bam} \
+                                             {params.fasta} \
+                                             {output.frag_bed}
+        """
+#+end_src
+- [[file:./workflow/scripts/read_to_frag_bed.sh][Base script]]
+  #+begin_src bash :tangle ./workflow/scripts/read_to_frag_bed.sh
+#########1#########2#########3#########4#########5#########6#########7#########8
+
+# Snakemake variables
+input_bam="$1"
+params_fasta="$2"
+output_frag_bed="$3"
+
+# Function
+bam_to_frag(){
+    # Make bedpe
+    bedtools bamtobed -bedpe -i $1 |
+        # Filter any potential non-standard alignments 
+        awk '$1==$4 {print $0}' | awk '$2 < $6 {print $0}' |
+        # Create full-fragment bed file
+        awk -v OFS='\t' '{print $1,$2,$6}' |
+        # Annotate with GC content and fragment length
+        bedtools nuc -fi $2 -bed stdin |
+        # Convert back to standard bed with additional columns
+        awk -v OFS='\t' '{print $1,$2,$3,$5,$12}' |
+        sed '1d' > $3
+    }
+
+# Run command
+bam_to_frag $input_bam \
+            $params_fasta \
+            $output_frag_bed
+#+end_src
+*** Ideas
+- https://www.biostars.org/p/92425/
+- to make own bins
+  - [[id:c0c0ee28-2e41-41a7-9a3b-ae195117a93e][Common bioinformatics file manipulation]] see fasta splitting
+  - "Sequence reads were aligned against the hg19 human reference genome using Bowtie248 and duplicate reads were removed using Sambamba49"
+  - "Post-alignment, each aligned pair was converted to a genomic interval representing the sequenced DNA fragment using bedtools 50."
+  - https://stackoverflow.com/questions/2294493/how-to-get-the-position-of-a-character-in-python
+  - https://bioinformatics.stackexchange.com/questions/5435/how-to-create-a-bed-file-from-fasta
+  - For gc
+    - Parse by Chr
+    - For each Chr, 5 mb bin and calc gc
+    - Get bin position start end 
+*** Reference
+- cite:mathios2021
+- https://github.com/cancer-genomics/reproduce_lucas_wflow
+
+
+
 ** Make normalized frag counts :smk:
+*** Smk rules
 :PROPERTIES:
 :header-args:snakemake: :tangle ./workflow/frag_counts.smk
 :END:
+**** Make healthy GC Distros                                       :smk_rule:
+- For each library, makes a csv with columns of library_id, gc_strata, and fract_frags
+- Snakemake
+  #+begin_src snakemake
+rule gc_distro:
+    input:        
+        frag = config["data_dir"] + "/frag/{library_id}_frag.bed",
+    params:
+        config["r_lib_loads"],
+    output:
+        config["data_dir"] + "/frag/{library_id}_gc_distro.csv"
+    script:
+        "scripts/gc_distro.R"
+#+end_src
+- [[file:workflow/scripts/gc_distro.R][Base script]]
+  #+begin_src R :tangle ./workflow/scripts/gc_distro.R
+#########1#########2#########3#########4#########5#########6#########7#########8
+
+# Source config
+source(snakemake@params[[1]])
+
+# Read in modified bed
+bed = read.table(snakemake@input[[1]], sep = '\t')
+names(bed) = c("chr","start","end","gc_raw","len")
+
+# Generate distribution csv
+distro = 
+  bed %>%
+  # Round GC
+  mutate(gc_strata = round(gc_raw, 2)) %>%
+  # Count frags per strata
+  count(gc_strata) %>%
+  # Get fraction frags
+  mutate(fract_frags = n/sum(n)) %>% mutate(library_id = gsub("_frag.bed", "", gsub("^.*lib", "lib", snakemake@input[[1]]))) %>%
+  select(library_id,gc_strata,fract_frags) %>%
+  write.csv(file = snakemake@output[[1]], row.names = F)
+#+end_src
+**** Make healthy GC summary                                       :smk_rule:
+- Makes a simple tibble of gc_strata and median fraction of fragments from healthy samples
+- Snakemake
+  #+begin_src snakemake
+rule make_healthy_gc_summary:
+    output:
+        healthy_med = config["data_dir"] + "/frag/healthy_med.rds"
+    script:
+        "scripts/make_healthy_gc_summary.R"
+#+end_src
+- [[file:workflow/scripts/make_healthy_gc_summary.R][Base script]]
+  #+begin_src R :tangle ./workflow/scripts/make_healthy_gc_summary.R
+#########1#########2#########3#########4#########5#########6#########7#########8
+source(snakemake@config[["r_lib_loads"]])
+
+# Read in healthy plasma gc distributions
+all_distros = list.files(path = paste0(snakemake@config[["data_dir"]],"/frag"),
+                       pattern = "gc_distro")
+healthy_libs = snakemake@config[["healthy_plasma"]]
+
+saveRDS(all_distros, file = snakemake@output[[1]])
+healthy_distros = paste0(snakemake@config[["data_dir"]],"/frag/",
+                         grep(paste(healthy_libs, collapse="|"),
+                              all_distros, value = T))
+
+        
+read_in_gc = function(gc_csv){
+  read.csv(gc_csv, header = T) 
+}
+healthy_list = lapply(healthy_distros, read_in_gc)
+
+# Bind
+healthy_all = do.call(rbind, healthy_list)
+
+# Summarize
+healthy_med = 
+  healthy_all %>%
+  group_by(gc_strata) %>%
+  summarise(med_frag_fract = median(fract_frags))
+
+# Save
+saveRDS(healthy_med, file = snakemake@output[["healthy_med"]])
+#+end_src
+**** Sample frags by gc :smk_rule:
+- Snakemake
+  #+begin_src snakemake
+rule sample_frags_by_gc:
+    input:
+        healthy_med = config["data_dir"] + "/frag/healthy_med.rds",
+        frag_bed = config["data_dir"] + "/frag/{library_id}_frag.bed"
+    output:
+        config["data_dir"] + "/frag/{library_id}_norm_frag.bed"
+    script:
+        "scripts/sample_frags_by_gc.R"
+#+end_src
+- [[file:./workflow/scripts/sample_frags_by_gc.R][Base script]]
+  #+begin_src R :noweb yes :tangle ./workflow/scripts/sample_frags_by_gc.R
+#########1#########2#########3#########4#########5#########6#########7#########8
+source(snakemake@config[["r_lib_loads"]])
+
+healthy_fract = readRDS(snakemake@input[["healthy_med"]])
+frag_file = read.table(snakemake@input[["frag_bed"]], sep = '\t', header = F)
+
+reject_sample = function(frag_bed,healthy_fract){
+  names(frag_bed) = c("chr", "start", "end", "gc_raw", "len")
+  sampled = frag_bed %>%
+    mutate(gc_strata = round(gc_raw, 2)) %>%
+    left_join(healthy_fract, by = "gc_strata") %>%
+    mutate(include = ifelse(runif(nrow(.),0,1) < med_frag_fract / max(med_frag_fract, na.rm = T), "yes", "no")) %>%
+    filter(include == "yes")
+  return(sampled)
+}
+
+sampled = reject_sample(frag_file, healthy_fract)
+
+write.table(sampled, sep = "\t", col.names = F, row.names = F, quote = F, file = snakemake@output[[1]])
+
+#+end_src
+**** Frag window sum:smk_rule:
+- Snakemake
+  #+begin_src snakemake
+rule frag_window_sum:
+    input:
+        frag = config["data_dir"] + "/frag/{library_id}_norm_frag.bed",
+    output:
+        short = config["data_dir"] + "/frag/{library_id}_norm_short.bed",
+        long = config["data_dir"] + "/frag/{library_id}_norm_long.bed",
+    shell:
+        """
+        workflow/scripts/frag_window_sum.sh {input.frag} \
+                                            {output.short} \
+                                            {output.long} 
+        """
+#+end_src
+- [[file:./workflow/scripts/frag_window_sum.sh][Base script]]
+  #+begin_src bash :tangle ./workflow/scripts/frag_window_sum.sh
+# Snakemake variables
+input_frag="$1"
+output_short="$2"
+output_long="$3"
+
+# Functions
+make_short(){
+    cat $1 | awk '{if ($5 >= 100 && $5 <= 150) print $0}' > $2
+}
+
+make_long(){
+    cat $1 | awk '{if ($5 >= 151 && $5 <= 220) print $0}' > $2    
+}
+
+# Run command
+make_short $input_frag $output_short
+make_long $input_frag $output_long
+
+#+end_src
+**** Frag window int:smk_rule:
+- Snakemake
+  #+begin_src snakemake
+rule frag_window_int:
+    input:
+        short = config["data_dir"] + "/frag/{library_id}_norm_short.bed",
+        long = config["data_dir"] + "/frag/{library_id}_norm_long.bed",
+        matbed = config["data_dir"] + "/ref/mathios_chrom_bins.bed",		
+    output:
+        cnt_long_tmp = config["data_dir"] + "/frag/{library_id}_cnt_long.tmp",
+        cnt_short_tmp = config["data_dir"] + "/frag/{library_id}_cnt_short.tmp",
+        cnt_long = config["data_dir"] + "/frag/{library_id}_cnt_long.bed",
+        cnt_short = config["data_dir"] + "/frag/{library_id}_cnt_short.bed",	
+    shell:
+        """
+        bedtools intersect -c -a {input.matbed} -b {input.long} > {output.cnt_long_tmp}
+        awk '{{print FILENAME (NF?"\t":"") $0}}' {output.cnt_long_tmp} | 
+        sed 's/^.*lib/lib/g' | 
+        sed 's/_cnt_/\t/g' | 
+        sed 's/.tmp//g' | 
+        awk 'BEGIN {{OFS="\t"}}; {{print $1,$2,$3,$4,$5,$10}}' > {output.cnt_long} 
+        bedtools intersect -c -a {input.matbed} -b {input.short} > {output.cnt_short_tmp}
+        awk '{{print FILENAME (NF?"\t":"") $0}}' {output.cnt_short_tmp} | 
+        sed 's/^.*lib/lib/g' | 
+        sed 's/_cnt_/\t/g' | 
+        sed 's/.tmp//g' | 
+        awk 'BEGIN {{OFS="\t"}}; {{print $1,$2,$3,$4,$5,$10}}' > {output.cnt_short}
+        """
+#+end_src
+- [[file:./workflow/scripts/frag_window_int.sh][Base script]]
+  #+begin_src :tangle ./workflow/scripts/frag_window_int.sh
+# Snakemake variables
+# Function
+# Run command
+#+end_src
+**** Count merge:smk_rule:
+- Snakemake
+  #+begin_src snakemake
+rule count_merge:
+    input:
+        expand(config["data_dir"] + "/frag/{library_id}_cnt_{length}.bed", library_id=ALLLIB, length=["short", "long"])
+    output:
+        config["data_dir"] + "/frag/frag_counts.tsv"
+    shell:
+        """
+        cat {input} > {output} 
+        """
+#+end_src
+- [[file:./workflow/scripts/count_merge.sh][Base script]]
+  #+begin_src :tangle ./workflow/scripts/count_merge.sh
+# Snakemake variables
+# Function
+# Run command
+#+end_src
+
+**** Count scale:smk_rule:
+- Snakemake
+  #+begin_src snakemake
+rule count_scale:
+    input:
+    output:
+    script:
+        "scripts/count_scale.R"
+#+end_src
+- [[file:./workflow/scripts/count_scale.R][Base script]]
+  #+begin_src R :noweb yes :tangle ./workflow/scripts/count_scale.R
+source("~/repos/mpnst-frag/config/library_loads.R")
+library(tidyverse)
+
+frag_count = read.table("/mnt/ris/aadel/mpnst/frag/frag_counts.tsv", header = F)
+load("/mnt/ris/aadel/mpnst/data_model/data_model.RData")
+
+names(frag_count) = c("library_id","frag_length","chr","start","end","count")
+
+test =
+  frag_count %>%
+  pivot_wider(names_from = frag_length, values_from = count) %>%
+  group_by(library_id,chr,start,end) %>%
+  mutate(ratio = short/long) 
+
+washout_libs = c("lib218","lib107","lib117","lib126","lib129","lib142","lib158","lib175","lib182","lib184","lib202","lib205")
+
+
+test2 = libraries_full %>%
+  filter(library_type == "wgs") %>%
+  filter(isolation_type == "cfdna") %>%
+  filter(institution %in% c("nci","washu")) %>%
+  filter(current_dx %in% c("plexiform","healthy") | library_id %in% washout_libs)
+
+
+test2 = libraries_full %>%
+  filter(library_type == "wgs") %>%
+  filter(isolation_type == "cfdna") %>%
+  filter(institution %in% c("nci","washu")) %>%
+  filter(current_dx %in% c("healthy", "plexiform"))
+
+dx = test2 %>% select(library_id, current_dx)
+
+frags = 
+  test %>% filter(library_id %in% dx$library_id)
+
+test = frags %>% select(library_id, chr, start, end, ratio) %>% pivot_wider(names_from = library_id, values_from = ratio)
+
+test2 = test
+head(test2)
+test2[4:91] = scale(test2[4:91])
+
+
+test3 = test2 %>% pivot_longer(starts_with("lib"), names_to = "library_id", values_to = "ratio") %>% left_join(dx, by = "library_id")
+
+test3 %>% filter(chr == "chr1") %>% ggplot(., aes(x = start, y = ratio, color = current_dx, group = library_id)) +
+  geom_line(stat = "smooth", span = 0.1, alpha = 0.8, aes(size = current_dx)) + facet_grid(~chr) + scale_size_manual(values = c(5,.5,.5))
+
+
+plot = 
+test3 %>% mutate(new_id = library_id) %>%
+mutate(new_id = ifelse(current_dx == "healthy", "healthy", library_id )) %>%
+ggplot(., aes(x = start, y = ratio, group = library_id, color = current_dx, linetype = current_dx)) +
+  geom_line(stat = "smooth", alpha = 0.8, span = 0.3) + facet_wrap(~chr, ncol = 2, scales = "free") + scale_size_manual(values = c(1,.5,.5))
+ggsave(plot, width = 30, height = 40, filename = "/tmp/plot.pdf")
+
+
+plot2 = 
+test3 %>% mutate(new_id = library_id) %>%
+mutate(new_id = ifelse(current_dx == "healthy", "healthy", library_id )) %>%
+ggplot(., aes(x = start, y = ratio, group = current_dx, color = current_dx, linetype = current_dx)) +
+  geom_smooth(alpha = 0.8, span = 0.3, aes(fill = current_dx)) + facet_wrap(~chr, ncol = 2, scales = "free") 
+ggsave(plot2, width = 30, height = 40, filename = "/tmp/plot2.pdf")
+
+
+
+ geom_line(stat="smooth",method = "lm", formula = y ~ 0 + I(1/x) + I((x-1)/x),
+              size = 1.5,
+              linetype ="dashed",
+              alpha = 0.5)
+
+test3 %>% filter(chr %in% c("chr20","chr17")) %>% ggplot(., aes(x = start, y = ratio, color = current_dx)) + geom_smooth(se = F, span = .2, alpha = 0.1) + facet_grid(~chr)
+
+
+head(test3)
+
+head(test2)
+
+mat = test2[,-c(1,2,3)]
+
+mat = as.matrix(mat)
+
+rownames(mat) = paste(test2$chr,test2$start,test2$end,sep = "_")
+head(mat)
+
+mat = t(mat)
+
+pca = prcomp(mat)
+
+# Get principle component 1 & 2 values
+(pve_pc1=round(100*summary(pca)$importance[2,1]))
+(pve_pc2=round(100*summary(pca)$importance[2,2]))
+
+summary(pca)$importance
+
+head(pca$x)
+
+pca_plot = as.data.frame(pca$x) %>%
+  rownames_to_column(var = "library_id") %>%
+  left_join(dx, by = "library_id") %>%
+  ggplot(., aes(x = PC1, y = PC2, color = current_dx)) + 
+  geom_point(size = 4)
+pca_plot
+
++
+  theme_cowplot() +
+  xlab(paste("PC1, ", pve_pc1, "% variance explained", sep ="")) +
+  ylab(paste("PC2, ", pve_pc2, "% variance explained", sep ="")) 
+pca_plot
+
+
+pca_plot = as.data.frame(pca$x) %>%
+  rownames_to_column(var = "sample_id") %>%
+  mutate(cohort_id = ifelse(grepl("a", sample_id), "ir", "sham")) %>%
+  ggplot(., aes(x = PC1, y = PC2, color = cohort_id)) +
+  geom_point(size = 4) +
+  theme_cowplot() +
+  xlab(paste("PC1, ", pve_pc1, "% variance explained", sep ="")) +
+  ylab(paste("PC2, ", pve_pc2, "% variance explained", sep ="")) 
+pca_plot
+
+
+head(test3)
+head(test)
+%>%
+  mutate_at(vars(starts_with("lib")), ~(scale(.) %>% as.vector))
+
+head(test2)
+
+
+... or you could just do dat[columns] <- scale(dat[columns]), which has worked consistently for the past 20 years ;-) – 
+
+dat2 <- dat %>% mutate_at(c("y", "z"), ~(scale(.) %>% as.vector))
+dat2
+test2 = test[, -c(1,2,3)]
+
+test2 = as.matrix(test2)
+
+scale(test2)
+
+%>% mutate_at(vars(starts_with("lib")), funs(c(scale(.))))
+
+head(test2)
+     mutate_at(c(3,6), funs(c(scale(.))))
+
+
+
+frags %>% ggplot(., aes(x = start, y = ratio))
+
+head(frag_count)
+
+frags %>% pivot_wider(names_from = library_id)
+test2
+
+test2$current_dx
+libraries_full$institution
+
+  names(libraries_full)
+ls()
+head(test)
+  group_by
+
+  pivot_wider(names_from = station, values_from = seen)
+
+
+
+
+head(frag_count)
+#+end_src
+*** Ideas
+:PROPERTIES:
+:END:
+def getTargets():
+    targets = list()
+    for r in config["TESTLIBS"]:
+	targets.append(config["data_dir"] + "/frag/" + config["TESTLIBS"] + "_norm_frag.bed")
+
+    return targets
+
+- [ ] need to evaulate gc binning by pcr cycle 
+**** transform to mean zero unit sd
+https://stats.stackexchange.com/questions/305672/what-is-unit-standard-deviation
+
 ** Held rules
 *** Make filter bed                                                :smk_rule:
 - Snakemake
@@ -68,5 +638,213 @@ rule make_filter_bed:
 - Reference
   - https://www.nature.com/articles/s41467-021-24994-w
   - https://www.biostars.org/p/80443/
+** Reference
+- cfDNA nucleosome profiling
+  - https://www.medrxiv.org/content/10.1101/2021.08.31.21262867v1.full-text  
+- GC correction for cfDNA WGS
+  - https://www.medrxiv.org/content/10.1101/2021.08.31.21262867v1.full-text
+- [[file:~/repos/biotools/biotools.org::*cfDNA fragmentomics][cfDNA fragmentomics]] cite:mathios2021
+- [[id:347d4cc0-a25d-4636-96d4-65e6319022df][Mappability]]
+
 ** Ideas
 - ggridgeplot of frag distros
+
+*** Ideas
+ALLLIB = []
+for number in range(1,249):
+    ALLLIB.append((str("lib"f"{number:03d}")))
+ALLLIB.remove("lib115")
+ALLLIB.remove("lib118")
+ALLLIB.remove("lib200")
+ALLLIB.remove("lib234")
+ALLLIB.remove("lib240")
+
+
+- https://bioconductor.org/packages/release/bioc/vignettes/BiocParallel/inst/doc/Introduction_To_BiocParallel.pdf
+
+- ideas    
+  - Reference binning output metrics- bins count, included bins count, total included bins bases 
+- ?downsample
+- https://bioconductor.org/packages/release/bioc/vignettes/BiocParallel/inst/doc/Introduction_To_BiocParallel.pdf
+
+**** Exclude fasta map GC
+:LOGBOOK:
+CLOCK: [2021-12-08 Wed 10:58]--[2021-12-08 Wed 11:34] =>  0:36
+CLOCK: [2021-12-08 Wed 10:08]--[2021-12-08 Wed 10:58] =>  0:50
+CLOCK: [2021-11-29 Mon 12:44]--[2021-11-29 Mon 13:05] =>  0:21
+:END:
+#+begin_src snakemake
+rule exclude_fasta_map_gc:
+    input:
+        bam = config["data_dir"] + "/bam/{library}_duke.bam",
+        blacklist = config["data_dir"] + "/inputs/mathios_chrom_bins.bed",	
+    output:
+        config["data_dir"] + "/bam/{library}_mathios.bam", 
+    shell:
+        """
+	bedtools intersect -a {input.bam} -b {input.blacklist} -v > {output}
+        """
+#+end_src
+#+begin_src R
+source(file.path(paste0("./config/", as.character(Sys.info()["nodename"]), ".R")))
+
+chrom_bins = read.csv(file.path(data_dir,"inputs/mathios_keep.csv"), header = T)
+
+chrom_bins
+
+chrom_bins_exclude = chrom_bins %>%
+  filter(gc < 0.3)
+
+chrom_bins_exclude
+
+library(dplyr)
+
+
+#chrom_bins = read.csv(file.path(data_dir,"inputs/mathios_chrom_bins.csv"), header = T)
+
+#+end_src
+
+
+
+ To cap-
+ture large-scale epigenetic differences in fragmentation across the genome estimable
+from low-coverage whole-genome sequencing, we tiled the hg19 reference genome
+into non-overlapping 5 Mb bins (Supplementary Table 12). Bins with an average
+GC content <0.3 and an average mappability <0.9 were excluded, leaving 473 bins
+spanning approximately 2.4 GB of the genome (Supplementary Table 11).
+"
+
+#+begin_src bash
+sudo groupadd conda
+sudo usermod -a -G conda jszymanski
+
+#########1#########2#########3#########4#########5#########6#########7#########8
+
+sudo chown -R jszymanski:conda /opt/mambaforge
+sudo chmod -R 774 /opt/mambaforge
+
+#########1#########2#########3#########4#########5#########6#########7#########8
+source config/${HOSTNAME}.sh            
+
+conda install -c bioconda ucsc-fasplit
+
+y
+
+conda install -c bioconda seqkit
+y
+
+#########1#########2#########3#########4#########5#########6#########7#########8
+if [ ! -f "${data_dir}/inputs/hg19.fa" ]; then gunzip -c "${data_dir}/inputs/hg19.fa.gz" "${data_dir}/inputs/hg19.fa"; fi
+
+faSplit size ${data_dir}/inputs/hg19.fa 5000000 -oneFile /tmp/test.fa 
+
+seqkit fx2tab --name --header-line --gc /tmp/test.fa.fa > /tmp/res2
+
+| awk -F "\t" '{if ($2 < 35) print $1}' | xargs -n 1 sh -c 'seqkit grep --pattern "$0" /tmp/test.fa.fa' > /tmp/results.fa
+
+
+# https://www.biostars.org/p/9465609/
+seqkit fx2tab --name --only-id --gc contigs.fa | awk -F "\t" '{if ($2 < 35) print $1}' | xargs -n 1 sh -c 'seqkit grep --pattern "$0" contigs.fa' > results.fa
+
+
+Options:
+    -verbose=2 - Write names of each file created (=3 more details)
+    -maxN=N - Suppress pieces with more than maxN n's.  Only used with size.
+              default is size-1 (only suppresses pieces that are all N).
+    -oneFile - Put output in one file. Only used with size
+    -extra=N - Add N extra bytes at the end to form overlapping pieces.  Only used with size.
+    -out=outFile Get masking from outfile.  Only used with size.
+    -lift=file.lft Put info on how to reconstruct sequence from
+                   pieces in file.lft.  Only used with size and gap.
+    -minGapSize=X Consider a block of Ns to be a gap if block size >= X.
+                  Default value 1000.  Only used with gap.
+    -noGapDrops - include all N's when splitting by gap.
+    -outDirDepth=N Create N levels of output directory under current dir.
+                   This helps prevent NFS problems with a large number of
+                   file in a directory.  Using -outDirDepth=3 would
+                   produce ./1/2/3/outRoot123.fa.
+    -prefixLength=N - used with byname option. create a separate output
+                   file for each group of sequences names with same prefix
+                   of length N.
+
+(base) jszymanski@aclm350:/drive3/users/jszymanski/repos/mpnst$ 
+#+end_src
+
+    
+- https://github.com/mdshw5/pyfaidx/ -x command 
+- /tmp/test.fasta 
+- https://crashcourse.housegordon.org/split-fasta-files.html
+- https://pythonhosted.org/pyfaidx/
+- https://stackoverflow.com/questions/17060039/split-string-at-nth-occurrence-of-a-given-character/17060409      
+**** Fetch inputs
+#+begin_src python
+rule fetch_inputs:
+    output:
+        fa_zip = config["data_dir"] + "inputs/hg19.fa.gz",
+	fa_unzip = config["data_dir"] + "inputs/hg19.fa"
+    shell:
+        """
+        if [ ! -f {output.fa_zip} ]; then wget -O {output.fa_zip} http://hgdownload.cse.ucsc.edu/goldenPath/hg19/bigZips/hg19.fa.gz; fi
+        if [ ! -f {output.fa_unzip} ]; then gunzip --to-stdout {output.fa_zip} > {output.fa_unzip}; fi
+        """
+#+end_src
+
+  
+**** Filtered FASTA to bed
+#+begin_src snakemake
+rule filtered_fasta_to_bed:
+    input:
+        config["data_dir"] + "/test/bam/{library}_mathios.bam", 
+    output:
+        
+    shell:
+        """
+        """
+#+end_src
+**** Filtered FASTA to frag summary
+:LOGBOOK:
+CLOCK: [2021-12-08 Wed 11:34]--[2021-12-08 Wed 12:05] =>  0:31
+:END:
+
+rule filtered_fasta_to_frag_summary:
+    input:
+        config["data_dir"] + "/bam/{library}_mathios.bam"
+    output:
+        config["data_dir"] + "/frag/{library}_frag.tsv"
+    shell:
+        """
+        sambamba view -t CORES {input} \
+        | awk -F'\t' |
+        """
+
+frag_filter(){
+# Takes indexed bam. Returns bam with only fragments of specified range
+# Input parameters:
+#  $1 = input bam
+#  $2 = output directory
+#  $3 = lower fragment length
+#  $4 = upper fragment length
+#  $5 = number of cores used
+# Steps
+##
+    ## Filter by absolute value of TLEN for each read
+    sambamba view -t $5 $1 \
+        | awk -F'\t' -v upper="$4" 'sqrt($9*$9) < upper {print $0}' \                                     |
+        | awk -F'\t' -v lower="$3" 'sqrt($9*$9) > lower {print $0}' > $2/${base}_frag"${3}"_"${4}".nohead |
+    ## Restore header
+    samtools view -H $1 > $2/${base}_frag"${3}"_"${4}".onlyhead 
+    cat $2/${base}_frag"${3}"_"${4}".onlyhead $2/${base}_frag"${3}"_"${4}".nohead > $2/${base}_frag"${3}"_"${4}".sam
+    ## Create filtered bam, sort, and index
+    echo "$base fragment filtered, now re-sorting and indexing"
+    sambamba view -t $5 -S -f bam $2/${base}_frag"${3}"_"${4}".sam > $2/${base}_frag"${3}"_"${4}".bam
+    sambamba sort -t $5 -o $2/${base}_frag"${3}"_"${4}"_sorted.bam $2/${base}_frag"${3}"_"${4}".bam
+    ## Clean up intermediate files
+    rm -f $2/*.nohead
+    rm -f $2/*.onlyhead
+    rm -f $2/*.sam
+    rm $2/${base}_frag"${3}"_"${4}".bam
+}
+
+
+
+  
