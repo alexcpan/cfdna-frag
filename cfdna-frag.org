@@ -3,6 +3,186 @@
 :header-args:bash: :tangle-mode (identity #o555)
 :logging: nil
 :END:
+#+begin_src R
+source('./src/setup.R'); load("./data/data_model.RData"); source("./src/high-pretx-preprocessing.R"); source("./src/Taylor_additional_packages.R")
+
+####Load fragment summary data frame####
+fragcount<-read.delim("./data/frag_size_summary.tsv")
+  fragcount$server<-fragcount$sample #create duplicate column that will parse to sample name. Will use this id for merging w/ TF data
+  fragcount$filter<- ifelse(grepl("frag",fragcount$server),'filtered','unfiltered') #fragment filtered (90 to 150bp) have pathway *.dedup.sorted.frag.sorted.bam, unfiltered are *.dedup.sorted.bam
+  fragcount$sample<-sub(".*/", "", fragcount$sample)
+  fragcount$sample<-sub(".dedup.*", "", fragcount$sample) 
+names(fragcount)[names(fragcount) == "sample"] <- "library_id"
+
+frag_unfiltered<- fragcount[(fragcount$filter=="unfiltered"),] 
+frag_unfiltered<-frag_unfiltered %>% filter(size <351 & size>0) #filter for <350bp
+frag_unfiltered<- merge(frag_unfiltered, all_mpnst_highest_plex_healthy, by="library_id", all = FALSE) %>% select(library_id, institution, current_dx, tf, size, occurences)
+
+rm(fragcount); gc()
+
+####log2 mean densitiy plot####
+#Filtering for 0 to 350bp, all samples (and WUSTL if uncommented)#
+#frag_MPNST_unfiltered<- frag_unfiltered %>% filter(current_dx=="mpnst" & institution=="washu" & size<351 & size >0)
+frag_MPNST_unfiltered<- frag_unfiltered %>% filter(current_dx=="mpnst" & size<351 & size >0)
+mean_MPNST_unfiltered<-aggregate( occurences ~ size, frag_MPNST_unfiltered, mean )
+  mean_MPNST_unfiltered$occurences<-round(mean_MPNST_unfiltered$occurences, digits = 0)
+  mean_MPNST_unfiltered$current_dx<-"MPNST"
+z<-sum(mean_MPNST_unfiltered$occurences)
+mean_MPNST_unfiltered$normalized<-as.numeric((mean_MPNST_unfiltered$occurences)/z)
+
+#frag_pn_unfiltered<- frag_unfiltered %>% filter(current_dx=="plexiform" & institution=="washu" & size<351 & size >0) 
+frag_pn_unfiltered<- frag_unfiltered %>% filter(current_dx=="plexiform" & size<351 & size >0) 
+mean_pn_unfiltered<-aggregate( occurences ~ size, frag_pn_unfiltered, mean )
+mean_pn_unfiltered$occurences<-round(mean_pn_unfiltered$occurences, digits = 0)
+mean_pn_unfiltered$current_dx<-"PN"
+z<-sum(mean_pn_unfiltered$occurences)
+mean_pn_unfiltered$normalized<-as.numeric((mean_pn_unfiltered$occurences)/z)
+
+combined_mean<-merge(mean_MPNST_unfiltered,mean_pn_unfiltered,by="size")
+  combined_mean$delta<-as.numeric(combined_mean$normalized.x-combined_mean$normalized.y)
+  combined_mean$foldchange<-foldchange(combined_mean$normalized.x, combined_mean$normalized.y)
+  combined_mean$log2<-foldchange2logratio(combined_mean$foldchange,base=2)
+  combined_mean$Diagnosis<- ifelse(combined_mean$log2 < 0, 'Plexiform', 'MPNST')
+z<-min(combined_mean$log2)
+
+log<- ggplot(combined_mean, aes(x = size))+
+  geom_area(aes(y = log2))+
+  geom_vline(xintercept= c(150), linetype="dotted")+ 
+  scale_x_continuous(name = "Fragment Length (bp)") +
+  scale_y_continuous(name = "Log2ratio mean density") +
+  #scale_fill_manual(values=c("#DE2019", "#000000")) +
+  theme_cowplot(12)+
+  theme(text=element_text(size=15))
+
+ggsave("./imgs/log2_mean_density_all.pdf", log, width=5,height=6)
+rm(frag_MPNST_unfiltered, frag_pn_unfiltered, mean_pn_unfiltered, mean_MPNST_unfiltered, combined_mean, z, log); gc()
+
+####Fragment Analysis 90 to 150bp, all samples####
+frag_MPNST_unfiltered<- frag_unfiltered %>% filter(current_dx=="mpnst" & size<151 & size >89)
+  mean_MPNST_unfiltered<-aggregate( occurences ~ size, frag_MPNST_unfiltered, mean )
+  mean_MPNST_unfiltered$occurences<-round(mean_MPNST_unfiltered$occurences, digits = 0)
+  mean_MPNST_unfiltered$current_dx<-"MPNST"
+z<-sum(mean_MPNST_unfiltered$occurences)
+mean_MPNST_unfiltered$normalized<-as.numeric((mean_MPNST_unfiltered$occurences)/z)
+
+frag_pn_unfiltered<- frag_unfiltered %>% filter(current_dx=="plexiform" & size<151 & size >89)
+  mean_pn_unfiltered<-aggregate( occurences ~ size, frag_pn_unfiltered, mean )
+  mean_pn_unfiltered$occurences<-round(mean_pn_unfiltered$occurences, digits = 0)
+  mean_pn_unfiltered$current_dx<-"PN"
+z<-sum(mean_pn_unfiltered$occurences)
+mean_pn_unfiltered$normalized<-as.numeric((mean_pn_unfiltered$occurences)/z)
+
+frag_healthy_unfiltered<- frag_unfiltered %>% filter(current_dx=="healthy" & size<151 & size >89)
+  mean_healthy_unfiltered<-aggregate( occurences ~ size, frag_healthy_unfiltered, mean )
+  mean_healthy_unfiltered$occurences<-round(mean_healthy_unfiltered$occurences, digits = 0)
+  mean_healthy_unfiltered$current_dx<-"Healthy"
+z<-sum(mean_healthy_unfiltered$occurences)
+mean_healthy_unfiltered$normalized<-as.numeric((mean_healthy_unfiltered$occurences)/z)
+
+mpnst_expanded<- mean_MPNST_unfiltered %>%  uncount(occurences) 
+pn_expanded<-mean_pn_unfiltered %>%  uncount(occurences) 
+healthy_expanded<-mean_healthy_unfiltered %>%  uncount(occurences) 
+
+####KS Calculations: PN, MPNST, Healthy####
+KS_MPNST_PN_p_value<-format.pval(ks.test(mpnst_expanded$size, pn_expanded$size)$p.value)
+KS_MPNST_PN<-ks.test(mpnst_expanded$size, pn_expanded$size)
+capture.output(KS_MPNST_PN, file="./results/Fragment_KS.txt", append=TRUE)
+write(paste("p-value from NCI/WUSTL MPNST v PN size distributions 90 to 150bp:", KS_MPNST_PN_p_value, "\n"), 
+      file = "./results/Fragment_KS.txt", append=TRUE)
+rm(KS_MPNST_PN_p_value, KS_MPNST_PN)
+gc()
+
+KS_PN_Healthy_p_value<-format.pval(ks.test(pn_expanded$size, healthy_expanded$size)$p.value)
+KS_PN_Healthy<-ks.test(pn_expanded$size, healthy_expanded$size)
+capture.output(KS_PN_Healthy, file="./results/Fragment_KS.txt", append=TRUE)
+write(paste("p-value from NCI/WUSTL PN v Healthy size distributions 90 to 150bp:", KS_PN_Healthy_p_value, "\n"), 
+      file = "./results/Fragment_KS.txt", append=TRUE)
+
+rm(KS_PN_Healthy_p_value, KS_PN_Healthy)
+gc()
+
+KS_MPNST_Healthy_p_value<-format.pval(ks.test(mpnst_expanded$size, healthy_expanded$size)$p.value)
+KS_MPNST_Healthy<-ks.test(mpnst_expanded$size, healthy_expanded$size)
+capture.output(KS_MPNST_Healthy, file="./results/Fragment_KS.txt", append=TRUE)
+write(paste("p-value from NCI/WUSTL MPNST v Healthy size distributions 90 to 150bp:", KS_MPNST_Healthy_p_value, "\n"), 
+      file = "./results/Fragment_KS.txt", append=TRUE)
+
+rm(KS_MPNST_Healthy_p_value, KS_MPNST_Healthy)
+gc()  
+
+####90 to 150 mpnst, pn, healthy bp density plot####
+combined<-rbind(healthy_expanded, mpnst_expanded, pn_expanded)
+rm(healthy_expanded, mpnst_expanded, pn_expanded, frag_MPNST_unfiltered, frag_pn_unfiltered, frag_healthy_unfiltered)
+#myorder <- c("Healthy", "PN", "MPNST")
+myorder <- c("MPNST", "PN", "Healthy")
+combined <- combined %>% 
+  mutate(current_dx = factor(current_dx, levels = rev(myorder)))
+
+Fragments_90to150<-ggplot()+
+  geom_density(data=combined,aes(x= size, color=current_dx), alpha=0.5) +
+  scale_x_continuous(name = "Fragment Length (bp)") +
+  scale_y_continuous(name = "Density") +
+  scale_color_manual("Diagnosis", values=c(MPNST=col_mpnst, PN=col_plex, Healthy= col_healthy)) +
+  theme_cowplot(12)+
+  theme(text=element_text(size=15), legend.position = c(0.05, 0.9))
+
+ggsave("./imgs/90-150bp_PN_MPNST_Healthy.pdf",Fragments_90to150, width=5,height=6) 
+
+rm(combined, Fragments_90to150, mean_MPNST_unfiltered, mean_pn_unfiltered, mean_healthy_unfiltered); gc()
+
+####High/Low Tumor Fraction Fragment Distribution Comparison-####
+frag_unfiltered<-frag_unfiltered %>% filter(current_dx %in% c("plexiform","mpnst")) #Filter out healthy
+cutoff<-0.0413
+
+###90 to 150 bp Combined above/belowTF cutoff- all lesions####
+low_cutoff_unfiltered<-frag_unfiltered%>% filter(tf < cutoff) %>%filter(size <151 & size >89) %>% mutate(cutoff="low") %>% select(library_id,size,occurences,cutoff)
+mean_low_cutoff_unfiltered<-aggregate( occurences ~ size, low_cutoff_unfiltered, mean )
+  mean_low_cutoff_unfiltered$occurences<-round(mean_low_cutoff_unfiltered$occurences, digits = 0)
+  mean_low_cutoff_unfiltered$cutoff<-"Low"
+  mean_low_cutoff_unfiltered<- mean_low_cutoff_unfiltered %>% uncount(occurences)
+
+high_cutoff_unfiltered<-frag_unfiltered%>% filter(tf > cutoff|tf==cutoff) %>%filter(size <151 & size >89) %>% mutate(cutoff="low") %>% select(library_id,size,occurences,cutoff)
+mean_high_cutoff_unfiltered<-aggregate( occurences ~ size, high_cutoff_unfiltered, mean )
+  mean_high_cutoff_unfiltered$occurences<-round(mean_high_cutoff_unfiltered$occurences, digits = 0)
+  mean_high_cutoff_unfiltered$cutoff<-"High"
+  mean_high_cutoff_unfiltered<-mean_high_cutoff_unfiltered %>% uncount(occurences)
+
+KS_TF_high_low_p_value<-format.pval(ks.test(mean_high_cutoff_unfiltered$size, mean_low_cutoff_unfiltered$size)$p.value)
+KS_TF_high_low_Healthy<-ks.test(mean_high_cutoff_unfiltered$size, mean_low_cutoff_unfiltered$size)
+capture.output(KS_TF_high_low_Healthy, file="./results/Fragment_KS.txt", append=TRUE)
+write(paste("p-value from NCI/WUSTL TF high versus low size distributions 90 to 150 bp no healthies:", KS_TF_high_low_p_value, "\n"), 
+      file = "./results/Fragment_KS.txt", append=TRUE)
+
+df<-rbind(mean_low_cutoff_unfiltered, mean_high_cutoff_unfiltered )  
+rm(mean_low_cutoff_unfiltered,mean_high_cutoff_unfiltered, high_cutoff_unfiltered, low_cutoff_unfiltered) + gc()
+
+#Calculate density curve intercepts (https://stackoverflow.com/questions/25453706/how-to-find-the-intersection-of-two-densities-with-ggplot2-in-r)
+lower.limit <- min(df$size)
+upper.limit <- max(df$size)
+High.density <- density(subset(df, cutoff == "High")$size, from = lower.limit, to = upper.limit, n = 2^10)
+Low.density <- density(subset(df, cutoff == "Low")$size, from = lower.limit, to = upper.limit, n = 2^10)
+density.difference <- High.density$y - Low.density$y
+intersection.point90to150 <- High.density$x[which(diff(density.difference > 0) != 0) + 1]
+
+write(paste("90 to 150 bp TF high and TF low intercept (no healthies):", intersection.point90to150, "\n"), 
+      file = "./results/Fragment_KS.txt", append=TRUE)
+
+#Plot TF high/low
+tfhighlow<-ggplot(df, aes(x = size, colour = cutoff))+
+  geom_density(size=1.5) +
+  geom_vline(xintercept= intersection.point90to150, linetype="dotted", size=1.2)+ 
+  scale_x_continuous(breaks=c(100, 125, 150), name = "Fragment Length (bp)") +
+  scale_y_continuous(name = "Density") +
+  scale_color_manual("Tumor Fraction",values=c(High="#FDB309", Low="#442DDB")) +
+  scale_fill_manual("Tumor Fraction",values=c(High="#FDB309", Low="#442DDB")) +
+  labs(color="Tumor Fraction")+
+  theme_cowplot(12)+
+  theme(legend.position = "top", legend.justification="left",text=element_text(size=15), plot.title = element_text(size=15, hjust = 0.5))
+ggsave("./imgs/Figure4c-tf_highlow_fragment_density_plots.pdf", tfhighlow, width=5,height=6)
+
+rm(Fragments_90to150, frag_unfiltered, frag_pn_unfiltered, frag_MPNST_unfiltered, frag_healthy_unfiltered, healthy_expanded, pn_expanded, mpnst_expanded, high_cutoff_unfiltered, low_cutoff_unfiltered, High.density, KS_TF_high_low_Healthy, KS_TF_high_low_p_value, Low.density, High.density, tfhighlow, mean_high_cutoff_unfiltered, mean_low_cutoff_unfiltered, df);gc()
+   
+#+end_src
 ** Setup
 *** Repository
 - [[id:b1c8d0f3-42aa-4427-93e0-5e97261343d5][Make bioinformatics project repository directory structure]]
