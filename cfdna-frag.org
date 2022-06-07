@@ -1,3 +1,4 @@
+https://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/
 #+begin_src bash
 wget --directory-prefix resources/ https://static-content.springer.com/esm/art%3A10.1038%2Fs41467-021-24994-w/MediaObjects/41467_2021_24994_MOESM4_ESM.xlsx
 
