@@ -6,7 +6,7 @@ dir:
     cfdna_wgs: "test"
   repo:
     cfdna_wgs: "/home/jeszyman/repos/cfdna-frag"
-  script:
+  scripts:
     cfdna_wgs: "workflow/scripts"
 
 files:

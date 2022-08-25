@@ -3,6 +3,7 @@ rule filter_alignments:
         bam = cfdna_wgs_frag_bam_inputs + "/{library_id}.bam",
         keep_bed = config["files"]["cfdna_wgs_frag_keep_bed"],
     params:
+        script = config["dir"]["scripts"]["cfdna_wgs"] + "/filter_alignments.sh",
         temp_dir = config["dir"]["data"]["cfdna_wgs"] + "/tmp",
         threads = config["threads"]["cfdna_wgs"],
     resources:
@@ -13,11 +14,12 @@ rule filter_alignments:
         config["container"]["cfdna_wgs"],
     shell:
         """
-        workflow/scripts/filter_alignments.sh {input.bam} \
-                                              {input.keep_bed} \
-                                              {params.temp_dir} \
-                                              {params.threads} \
-                                              {output}
+        {params.script} \
+        {input.bam} \
+        {input.keep_bed} \
+        {params.temp_dir} \
+        {params.threads} \
+        {output}
         """
 
 rule read_to_frag_bed:
@@ -25,6 +27,7 @@ rule read_to_frag_bed:
         cfdna_wgs_frag_filt_bams + "/{library_id}_filt.bam",
     params:
         fasta = config["files"]["cfdna_wgs_genome_fasta"],
+        script = config["dir"]["scripts"]["cfdna_wgs"] + "/read_to_frag_bed.sh",
     output:
         cfdna_wgs_frag_beds + "/{library_id}_frag.bed",
     resources:
@@ -33,7 +36,8 @@ rule read_to_frag_bed:
         config["container"]["cfdna_wgs"]
     shell:
         """
-        workflow/scripts/read_to_frag_bed.sh {input} \
-                                             {params.fasta} \
-                                             {output}
+        {params.script} \
+	{input} \
+        {params.fasta} \
+        {output}
         """
