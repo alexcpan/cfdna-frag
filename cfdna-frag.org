@@ -4,7 +4,7 @@
 :logging: nil
 :END:
 ** Setup
-*** TODO Integration testing setup
+*** Integration testing setup
 - Get test data
   #+begin_src bash
 singularity shell --bind /mnt ~/sing_containers/cfdna_wgs.1.0.0.sif
@@ -57,46 +57,55 @@ bedtools intersect -a resources/gc.bed \
 
 cp resources/keep.bed test/inputs/
 #+end_src
-**** [[file:resources/][Resources]]
-*** Snakemake
-**** Configuration YAMLs
-#+begin_src bash :tangle config/repo_test.yaml
+- [[file:resources/][Resources]]
+*** [[file:config/int_test.yaml][Snakemake configuration YAMLs]]
+#+begin_src bash :tangle config/int_test.yaml
+container:
+  cfdna_wgs: "${HOME}/sing_containers/cfdna_wgs.1.0.0.sif"
 
+dir:
+  data:
+    cfdna_wgs: "test"
+  repo:
+    cfdna_wgs: "/home/jeszyman/repos/cfdna-frag"
+  script:
+    cfdna_wgs: "workflow/scripts"
+
+files:
+  cfdna_wgs_frag_keep_bed: "test/inputs/keep.bed"
+  cfdna_wgs_genome_fasta: "/mnt/ris/aadel/mpnst/inputs/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
+
+threads:
+  cfdna_wgs: 4
 #+end_src
-*** Repository
-- [[id:b1c8d0f3-42aa-4427-93e0-5e97261343d5][Make bioinformatics project repository directory structure]]
-  #+begin_src bash
-biotools/src/add_biorepo_dirs.sh
-#+end_src
-#+begin_src bash
-mkdir -p test/bam
-#+end_src
-** Make fragment bed files :smk:
+
+** DONE Make fragment bed files                                            :smk:
 :PROPERTIES:
 :header-args:snakemake: :tangle ./workflow/frag_bed.smk
 :END:
-*** Smk rules
-**** Filter alignments                                             :smk_rule:
+*** DONE Filter alignments                                            :smk_rule:
 - Snakemake
   #+begin_src snakemake
 rule filter_alignments:
     input:
-        bam = config["bam_dir"] + "/{library_id}.bam",
-        keep_bed = config["data_dir"] + "/ref/keep.bed",
+        bam = cfdna_wgs_frag_bam_inputs + "/{library_id}.bam",
+        keep_bed = config["files"]["cfdna_wgs_frag_keep_bed"],
     params:
-        temp_dir = config["data_dir"] + "/tmp/",
-        threads = config["threads"],
+        temp_dir = config["dir"]["data"]["cfdna_wgs"] + "/tmp",
+        threads = config["threads"]["cfdna_wgs"],
     resources:
         mem_mb=5000
     output:
-        filt_bam = config["data_dir"] + "/bam/{library_id}_filt.bam",
+        cfdna_wgs_frag_filt_bams + "/{library_id}_filt.bam",
+    container:
+        config["container"]["cfdna_wgs"],
     shell:
         """
         workflow/scripts/filter_alignments.sh {input.bam} \
                                               {input.keep_bed} \
                                               {params.temp_dir} \
                                               {params.threads} \
-                                              {output.filt_bam}
+                                              {output}
         """
 #+end_src
 - [[file:./workflow/scripts/filter_alignments.sh][Base script]]
@@ -118,23 +127,25 @@ output_filt_bam="$5"
 # Run command
 filter_bams "$params_threads" "$input_keep_bed" "$input_in_bam" "$output_filt_bam" $params_temp_dir
 #+end_src
-**** Read to frag bed                                              :smk_rule:
+*** DONE Read to frag bed                                             :smk_rule:
 - Snakemake
   #+begin_src snakemake
 rule read_to_frag_bed:
     input:
-        bam = config["data_dir"] + "/bam/{library_id}_filt.bam",
+        cfdna_wgs_frag_filt_bams + "/{library_id}_filt.bam",
     params:
-        fasta = config["data_dir"] + "/inputs/hg19.fa",
+        fasta = config["files"]["cfdna_wgs_genome_fasta"],
     output:
-        frag_bed = config["data_dir"] + "/frag/{library_id}_frag.bed",
+        cfdna_wgs_frag_beds + "/{library_id}_frag.bed",
     resources:
         mem_mb=5000
+    container:
+        config["container"]["cfdna_wgs"]
     shell:
         """
-        workflow/scripts/read_to_frag_bed.sh {input.bam} \
+        workflow/scripts/read_to_frag_bed.sh {input} \
                                              {params.fasta} \
-                                             {output.frag_bed}
+                                             {output}
         """
 #+end_src
 - [[file:./workflow/scripts/read_to_frag_bed.sh][Base script]]
@@ -167,6 +178,9 @@ bam_to_frag $input_bam \
             $output_frag_bed
 #+end_src
 *** :dev:
+:PROPERTIES:
+:header-args:snakemake: :tangle no
+:END:
 **** Ideas
 - https://www.biostars.org/p/92425/
 - to make own bins
@@ -609,13 +623,29 @@ rule make_filter_bed:
 - Reference
   - https://www.nature.com/articles/s41467-021-24994-w
   - https://www.biostars.org/p/80443/
-** Integration testing :smk:
+** Integration testing
+*** Snakefile
+:PROPERTIES:
+:header-args:snakemake: :tangle ./workflow/int_test.yaml
+:END:
+**** Preamble
+#+begin_src snakemake
+cfdna_wgs_frag_bam_inputs = config["dir"]["data"]["cfdna_wgs"] + "/bam/raw"
+cfdna_wgs_frag_filt_bams  = config["dir"]["data"]["cfdna_wgs"] + "/bam/frag"
+cfdna_wgs_frag_beds = config["dir"]["data"]["cfdna_wgs"] + "/frag"
+
+LIBRARIES = ["lib001", "lib002"]
+#+end_src
+**** All rule
 #+begin_src snakemake
 rule all:
     input:
-        expand(config["frag_dir"] + "/{library_id}_frag.bed", library_id=["lib001","lib002"]),
-
-include "frag_bed.smk"
+        expand(cfdna_wgs_frag_filt_bams + "/{library_id}_filt.bam", library_id = ["lib001", "lib002"]),
+        expand(cfdna_wgs_frag_beds + "/{library_id}_frag.bed", library_id = LIBRARIES),
+#+end_src
+**** Include statements
+#+begin_src snakemake
+include: config["dir"]["repo"]["cfdna_wgs"] + "/workflow/frag_bed.smk"
 #+end_src
 ** README
 ** :dev:

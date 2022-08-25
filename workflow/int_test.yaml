@@ -1,0 +1,12 @@
+cfdna_wgs_frag_bam_inputs = config["dir"]["data"]["cfdna_wgs"] + "/bam/raw"
+cfdna_wgs_frag_filt_bams  = config["dir"]["data"]["cfdna_wgs"] + "/bam/frag"
+cfdna_wgs_frag_beds = config["dir"]["data"]["cfdna_wgs"] + "/frag"
+
+LIBRARIES = ["lib001", "lib002"]
+
+rule all:
+    input:
+        expand(cfdna_wgs_frag_filt_bams + "/{library_id}_filt.bam", library_id = ["lib001", "lib002"]),
+        expand(cfdna_wgs_frag_beds + "/{library_id}_frag.bed", library_id = LIBRARIES),
+
+include: config["dir"]["repo"]["cfdna_wgs"] + "/workflow/frag_bed.smk"
