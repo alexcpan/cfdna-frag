@@ -52,10 +52,14 @@ read_tsv("resources/gc5mb.tsv") %>%
   #+begin_src bash
 singularity shell --bind /mnt ~/sing_containers/cfdna_wgs.1.0.0.sif
 
-bedtools intersect -a resources/gc.bed \
+bedtools subtract -a resources/gc.bed \
          -b resources/hg38-blacklist.v2.bed > resources/keep.bed
 
 cp resources/keep.bed test/inputs/
+
+bedtools subtract -a resources/gc.bed \
+         -b resources/hg38-blacklist.v2.bed |
+    bedtools sort -i stdin | bedtools merge -i stdin > resources/keep.bed
 #+end_src
 - [[file:resources/][Resources]]
 *** [[file:config/int_test.yaml][Snakemake configuration YAMLs]]
@@ -117,7 +121,8 @@ filter_bams(){
     # Filter to mapq 30 and limit to keep.bed genomic regions
     samtools view -@ $1 -b -h -L $2 -o - -q 30 $3 |
     samtools sort -@ $1 -n -o - -T $5 - |
-    samtools fixmate -@ $1 - $4
+    samtools fixmate -@ $1 - - |
+    samtools sort -@ $1 -n -o $4 -T $5 -
     }
 
 # Snakemake variables

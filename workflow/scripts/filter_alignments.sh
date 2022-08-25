@@ -3,7 +3,8 @@ filter_bams(){
     # Filter to mapq 30 and limit to keep.bed genomic regions
     samtools view -@ $1 -b -h -L $2 -o - -q 30 $3 |
     samtools sort -@ $1 -n -o - -T $5 - |
-    samtools fixmate -@ $1 - $4
+    samtools fixmate -@ $1 - - |
+    samtools sort -@ $1 -n -o $4 -T $5 -
     }
 
 # Snakemake variables
