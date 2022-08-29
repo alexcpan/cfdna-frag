@@ -1,79 +1,79 @@
+# For each library, makes a csv with columns of library_id, gc_strata, and fract_frags
 rule gc_distro:
+    container:
+        config["container"]["cfdna_wgs"],
     input:
-        frag = config["data_dir"] + "/frag/{library_id}_frag.bed",
+        cfdna_wgs_frag_beds + "/{library_id}_frag.bed",
+    log:
+        cfdna_wgs_logs + "/{library_id}_gc_distro.log",
+    output:
+        cfdna_wgs_distros + "/{library_id}_gc_distro.csv"
     params:
-        config["r_lib_loads"],
-    output:
-        config["data_dir"] + "/frag/{library_id}_gc_distro.csv"
-    script:
-        "scripts/gc_distro.R"
+        script = config["dir"]["scripts"]["cfdna_wgs"] + "/gc_distro.R",
+    shell:
+        """
+        Rscript {params.script} \
+        {input} \
+        {output} \
+        > {log} 2>&1
+        """
 
+# Make tibble of gc_strata and median fraction of fragments from healthy samples
 rule make_healthy_gc_summary:
+    container:
+        config["container"]["cfdna_wgs"],
+    log:
+        cfdna_wgs_logs + "/make_healthy_gc_summary.log",
     output:
-        healthy_med = config["data_dir"] + "/frag/healthy_med.rds"
-    script:
-        "scripts/make_healthy_gc_summary.R"
+        cfdna_wgs_distros + "/healthy_med.rds"
+    params:
+        distro_dir = cfdna_wgs_distros,
+        healthy_libs_str = LIBRARIES_HEALTHY,
+        script = config["dir"]["scripts"]["cfdna_wgs"] + "/make_healthy_gc_summary.R",
+    shell:
+        """
+        Rscript {params.script} \
+        {params.distro_dir} \
+        "{params.healthy_libs_str}" \
+        {output} > {log} 2>&1
+        """
 
 rule sample_frags_by_gc:
+    container:
+        config["container"]["cfdna_wgs"],
     input:
-        healthy_med = config["data_dir"] + "/frag/healthy_med.rds",
-        frag_bed = config["data_dir"] + "/frag/{library_id}_frag.bed"
+        healthy_med = cfdna_wgs_distros + "/healthy_med.rds",
+        frag_bed = cfdna_wgs_frag_beds + "/{library_id}_frag.bed",
+    log:
+        cfdna_wgs_logs + "/{library_id}_sample_frags_by_gc.log",
     output:
-        config["data_dir"] + "/frag/{library_id}_norm_frag.bed"
-    script:
-        "scripts/sample_frags_by_gc.R"
+        cfdna_wgs_frag_beds + "/{library_id}_frag_sampled.bed",
+    params:
+        script = config["dir"]["scripts"]["cfdna_wgs"] + "/sample_frags_by_gc.R",
+    shell:
+        """
+        Rscript {params.script} \
+        {input.healthy_med} \
+        {input.frag_bed} \
+        {output} > {log} 2>&1
+        """
 
 rule frag_window_sum:
+    container:
+        config["container"]["cfdna_wgs"],
     input:
-        frag = config["data_dir"] + "/frag/{library_id}_norm_frag.bed",
+        cfdna_wgs_frag_beds + "/{library_id}_norm_frag.bed",
+    log:
+        cfdna_wgs_logs + "/{library_id}_frag_window_sum.log",
     output:
-        short = config["data_dir"] + "/frag/{library_id}_norm_short.bed",
-        long = config["data_dir"] + "/frag/{library_id}_norm_long.bed",
+        short = cfdna_wgs_frag_len + "/{library_id}_norm_short.bed",
+        long = cfdna_wgs_frag_len + "/{library_id}_norm_long.bed",
+    params:
+        script = config["dir"]["scripts"]["cfdna_wgs"] + "/frag_window_sum.sh",
     shell:
         """
-        workflow/scripts/frag_window_sum.sh {input.frag} \
-                                            {output.short} \
-                                            {output.long}
+        {params.script} \
+        {input.frag} \
+        {output.short} \
+        {output.long} &> {log}
         """
-
-rule frag_window_int:
-    input:
-        short = config["data_dir"] + "/frag/{library_id}_norm_short.bed",
-        long = config["data_dir"] + "/frag/{library_id}_norm_long.bed",
-        matbed = config["data_dir"] + "/ref/mathios_chrom_bins.bed",
-    output:
-        cnt_long_tmp = config["data_dir"] + "/frag/{library_id}_cnt_long.tmp",
-        cnt_short_tmp = config["data_dir"] + "/frag/{library_id}_cnt_short.tmp",
-        cnt_long = config["data_dir"] + "/frag/{library_id}_cnt_long.bed",
-        cnt_short = config["data_dir"] + "/frag/{library_id}_cnt_short.bed",
-    shell:
-        """
-        bedtools intersect -c -a {input.matbed} -b {input.long} > {output.cnt_long_tmp}
-        awk '{{print FILENAME (NF?"\t":"") $0}}' {output.cnt_long_tmp} |
-        sed 's/^.*lib/lib/g' |
-        sed 's/_cnt_/\t/g' |
-        sed 's/.tmp//g' |
-        awk 'BEGIN {{OFS="\t"}}; {{print $1,$2,$3,$4,$5,$10}}' > {output.cnt_long}
-        bedtools intersect -c -a {input.matbed} -b {input.short} > {output.cnt_short_tmp}
-        awk '{{print FILENAME (NF?"\t":"") $0}}' {output.cnt_short_tmp} |
-        sed 's/^.*lib/lib/g' |
-        sed 's/_cnt_/\t/g' |
-        sed 's/.tmp//g' |
-        awk 'BEGIN {{OFS="\t"}}; {{print $1,$2,$3,$4,$5,$10}}' > {output.cnt_short}
-        """
-
-rule count_merge:
-    input:
-        expand(config["data_dir"] + "/frag/{library_id}_cnt_{length}.bed", library_id=ALLLIB, length=["short", "long"])
-    output:
-        config["data_dir"] + "/frag/frag_counts.tsv"
-    shell:
-        """
-        cat {input} > {output}
-        """
-
-rule count_scale:
-    input:
-    output:
-    script:
-        "scripts/count_scale.R"

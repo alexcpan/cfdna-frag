@@ -1,19 +1,28 @@
-#########1#########2#########3#########4#########5#########6#########7#########8
-source(snakemake@config[["r_lib_loads"]])
+args = commandArgs(trailingOnly = TRUE)
+healthy_med = args[1]
+frag_file = args[2]
+sampled_file = args[3]
 
-healthy_fract = readRDS(snakemake@input[["healthy_med"]])
-frag_file = read.table(snakemake@input[["frag_bed"]], sep = '\t', header = F)
+library(tidyverse)
 
-reject_sample = function(frag_bed,healthy_fract){
-  names(frag_bed) = c("chr", "start", "end", "gc_raw", "len")
-  sampled = frag_bed %>%
-    mutate(gc_strata = round(gc_raw, 2)) %>%
-    left_join(healthy_fract, by = "gc_strata") %>%
-    mutate(include = ifelse(runif(nrow(.),0,1) < med_frag_fract / max(med_frag_fract, na.rm = T), "yes", "no")) %>%
-    filter(include == "yes")
-  return(sampled)
-}
+healthy_fract = readRDS(healthy_med)
+frag_file = read.table(frag_file, sep = '\t', header = F)
 
-sampled = reject_sample(frag_file, healthy_fract)
+frag_bed = frag_file
+names(frag_bed) = c("chr", "start", "end", "gc_raw", "len")
 
-write.table(sampled, sep = "\t", col.names = F, row.names = F, quote = F, file = snakemake@output[[1]])
+frag = frag_bed %>%
+  # Round off the GC strata
+  mutate(gc_strata = round(gc_raw, 2)) %>%
+  # Join the median count of fragments per strata in healthies
+  # Use this later as sampling weight
+  left_join(healthy_fract, by = "gc_strata")
+
+# Determine frags to sample by counts in strata for which healthies had highest count
+stratatotake = frag$gc_strata[which.max(frag$med_frag_fract)]
+fragsinmaxstrata = length(which(frag$gc_strata == stratatotake))
+fragstotake = round(fragsinmaxstrata/stratatotake)
+
+sampled = slice_sample(frag, n = nrow(frag), weight_by = med_frag_fract, replace = T) %>% select(chr, start, end, len, gc_strata)
+
+write.table(sampled, sep = "\t", col.names = F, row.names = F, quote = F, file = sampled_file)

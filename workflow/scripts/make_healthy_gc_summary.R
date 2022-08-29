@@ -1,21 +1,17 @@
-#########1#########2#########3#########4#########5#########6#########7#########8
-source(snakemake@config[["r_lib_loads"]])
+args = commandArgs(trailingOnly = TRUE)
+distro_dir = args[1]
+healthy_libs_str = args[2]
+healthy_med_file = args[3]
 
-# Read in healthy plasma gc distributions
-all_distros = list.files(path = paste0(snakemake@config[["data_dir"]],"/frag"),
-                       pattern = "gc_distro")
-healthy_libs = snakemake@config[["healthy_plasma"]]
+library(tidyverse)
 
-saveRDS(all_distros, file = snakemake@output[[1]])
-healthy_distros = paste0(snakemake@config[["data_dir"]],"/frag/",
-                         grep(paste(healthy_libs, collapse="|"),
-                              all_distros, value = T))
-
+healthy_libs_distros = paste0(distro_dir, "/", unlist(strsplit(healthy_libs_str, " ")), "_gc_distro.csv")
 
 read_in_gc = function(gc_csv){
   read.csv(gc_csv, header = T)
 }
-healthy_list = lapply(healthy_distros, read_in_gc)
+
+healthy_list = lapply(healthy_libs_distros, read_in_gc)
 
 # Bind
 healthy_all = do.call(rbind, healthy_list)
@@ -27,4 +23,4 @@ healthy_med =
   summarise(med_frag_fract = median(fract_frags))
 
 # Save
-saveRDS(healthy_med, file = snakemake@output[["healthy_med"]])
+saveRDS(healthy_med, file = healthy_med_file)
