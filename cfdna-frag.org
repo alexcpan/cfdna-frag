@@ -487,8 +487,12 @@ include: config["dir"]["repo"]["cfdna_wgs"] + "/workflow/frag_bed.smk"
 :export_options: toc:nil ^:nil
 :END:
 *** Changelog
+- [2022-08-31 Wed] Added counts per keep.bed bin
 - [2022-08-29 Mon] Validated to short and long frag bed files
 ** :dev:
+*** Ideas
+:PROPERTIES:
+:END:
 - multimappers in bedtools would need a CIGAR filt (no flag) https://www.biostars.org/p/239772/
 - [ ] make hg38 gc filter https://stackoverflow.com/questions/8551349/how-to-sum-up-every-10-lines-and-calculate-average-using-awk
 frag heat map
@@ -698,6 +702,17 @@ rm(Fragments_90to150, frag_unfiltered, frag_pn_unfiltered, frag_MPNST_unfiltered
 #+end_src
 - ggridgeplot of frag distros
 
+def getTargets():
+    targets = list()
+    for r in config["TESTLIBS"]:
+	targets.append(config["data_dir"] + "/frag/" + config["TESTLIBS"] + "_norm_frag.bed")
+
+    return targets
+
+- [ ] need to evaulate gc binning by pcr cycle
+**** transform to mean zero unit sd
+https://stats.stackexchange.com/questions/305672/what-is-unit-standard-deviation
+
 **** Ideas
 ALLLIB = []
 for number in range(1,249):
@@ -893,7 +908,7 @@ frag_filter(){
     rm -f $2/*.sam
     rm $2/${base}_frag"${3}"_"${4}".bam
 }
-*** GC and mappability
+**** GC and mappability
 - [ ] add ucsc tools to biotools singularity http://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/
 - likely solutions
   - https://wiki.bits.vib.be/index.php/Create_a_GC_content_track
@@ -949,21 +964,7 @@ gunzip -c "$output_duke_zip" > "$output_duke_unzip" 2>> "$log"
 
 
 -
-*** Ideas
-:PROPERTIES:
-:END:
-def getTargets():
-    targets = list()
-    for r in config["TESTLIBS"]:
-	targets.append(config["data_dir"] + "/frag/" + config["TESTLIBS"] + "_norm_frag.bed")
-
-    return targets
-
-- [ ] need to evaulate gc binning by pcr cycle
-**** transform to mean zero unit sd
-https://stats.stackexchange.com/questions/305672/what-is-unit-standard-deviation
-
-*** Count scale:smk_rule:
+**** Count scale:smk_rule:
 - Snakemake
   #+begin_src snakemake
 rule count_scale:
@@ -1142,11 +1143,11 @@ head(test)
 
 head(frag_count)
 #+end_src
-*** INPROCESS Make normalized frag counts                               :smk:
+**** Make normalized frag counts                                        :smk:
 :PROPERTIES:
 :header-args:snakemake: :tangle ./workflow/frag_counts.smk
 :END:
-*** Count merge:smk_rule:
+**** Count merge:smk_rule:
 - Snakemake
   #+begin_src snakemake
 rule count_merge:
