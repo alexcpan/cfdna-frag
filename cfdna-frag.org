@@ -3,6 +3,7 @@
 :header-args:bash: :tangle-mode (identity #o555)
 :logging: nil
 :END:
+is keep bed subsettign bins or trimming them?
 ** Setup
 *** Integration testing setup
 #+begin_src bash
@@ -391,6 +392,37 @@ make_short $input_frag $output_short
 make_long $input_frag $output_long
 
 #+end_src
+*** INPROCESS Frag window int:smk_rule:
+- Snakemake
+  #+begin_src snakemake
+rule frag_window_int:
+    input:
+        short = cfdna_wgs_frag_len + "/{library_id}_norm_short.bed",
+        long = cfdna_wgs_frag_len + "/{library_id}_norm_long.bed",
+        matbed = "test/inputs/keep.bed",
+    output:
+        cnt_long_tmp = temp(cfdna_wgs_frag_cnt + "/{library_id}_cnt_long.tmp"),
+        cnt_short_tmp = temp(cfdna_wgs_frag_cnt + "/{library_id}_cnt_short.tmp"),
+        cnt_long = cfdna_wgs_frag_cnt + "/{library_id}_cnt_long.bed",
+        cnt_short = cfdna_wgs_frag_cnt + "/{library_id}_cnt_short.bed",
+    shell:
+        """
+        bedtools intersect -c -a {input.matbed} -b {input.long} > {output.cnt_long_tmp}
+        awk '{{print FILENAME (NF?"\t":"") $0}}' {output.cnt_long_tmp} |
+        sed 's/^.*lib/lib/g' |
+        sed 's/_.*tmp//g' > {output.cnt_long}
+        bedtools intersect -c -a {input.matbed} -b {input.short} > {output.cnt_short_tmp}
+        awk '{{print FILENAME (NF?"\t":"") $0}}' {output.cnt_short_tmp} |
+        sed 's/^.*lib/lib/g' |
+        sed 's/_.*tmp//g' > {output.cnt_short}
+        """
+#+end_src
+- [[file:./workflow/scripts/frag_window_int.sh][Base script]]
+  #+begin_src :tangle ./workflow/scripts/frag_window_int.sh
+# Snakemake variables
+# Function
+# Run command
+#+end_src
 ***                                                                     :dev:
 :PROPERTIES:
 :header-args:snakemake: :tangle no
@@ -417,7 +449,7 @@ make_long $input_frag $output_long
 
 ** INPROCESS Integration testing
 :PROPERTIES:
-:header-args:snakemake: :tangle ./workflow/int_test.yaml
+:header-args:snakemake: :tangle ./workflow/int_test.smk
 :END:
 *** Preamble
 #+begin_src snakemake
@@ -427,6 +459,7 @@ cfdna_wgs_frag_beds =       config["dir"]["data"]["cfdna_wgs"] + "/frag"
 cfdna_wgs_distros =         config["dir"]["data"]["cfdna_wgs"] + "/distro"
 cfdna_wgs_logs =            config["dir"]["data"]["cfdna_wgs"] + "/logs"
 cfdna_wgs_frag_len =        config["dir"]["data"]["cfdna_wgs"] + "/len"
+cfdna_wgs_frag_cnt =        config["dir"]["data"]["cfdna_wgs"] + "/bed-frag-cnt"
 
 LIBRARIES = ["lib001", "lib002"]
 
@@ -442,6 +475,7 @@ rule all:
         cfdna_wgs_distros + "/healthy_med.rds",
         expand(cfdna_wgs_frag_beds      + "/{library_id}_frag_sampled.bed", library_id = LIBRARIES),
         expand(cfdna_wgs_frag_len      + "/{library_id}_norm_short.bed", library_id = LIBRARIES),
+        expand(cfdna_wgs_frag_cnt + "/{library_id}_cnt_long.bed", library_id = LIBRARIES),
 #+end_src
 *** Include statements
 #+begin_src snakemake
@@ -1107,41 +1141,6 @@ head(test)
 
 
 head(frag_count)
-#+end_src
-*** Frag window int:smk_rule:
-- Snakemake
-  #+begin_src snakemake
-rule frag_window_int:
-    input:
-        short = config["data_dir"] + "/frag/{library_id}_norm_short.bed",
-        long = config["data_dir"] + "/frag/{library_id}_norm_long.bed",
-        matbed = config["data_dir"] + "/ref/mathios_chrom_bins.bed",
-    output:
-        cnt_long_tmp = config["data_dir"] + "/frag/{library_id}_cnt_long.tmp",
-        cnt_short_tmp = config["data_dir"] + "/frag/{library_id}_cnt_short.tmp",
-        cnt_long = config["data_dir"] + "/frag/{library_id}_cnt_long.bed",
-        cnt_short = config["data_dir"] + "/frag/{library_id}_cnt_short.bed",
-    shell:
-        """
-        bedtools intersect -c -a {input.matbed} -b {input.long} > {output.cnt_long_tmp}
-        awk '{{print FILENAME (NF?"\t":"") $0}}' {output.cnt_long_tmp} |
-        sed 's/^.*lib/lib/g' |
-        sed 's/_cnt_/\t/g' |
-        sed 's/.tmp//g' |
-        awk 'BEGIN {{OFS="\t"}}; {{print $1,$2,$3,$4,$5,$10}}' > {output.cnt_long}
-        bedtools intersect -c -a {input.matbed} -b {input.short} > {output.cnt_short_tmp}
-        awk '{{print FILENAME (NF?"\t":"") $0}}' {output.cnt_short_tmp} |
-        sed 's/^.*lib/lib/g' |
-        sed 's/_cnt_/\t/g' |
-        sed 's/.tmp//g' |
-        awk 'BEGIN {{OFS="\t"}}; {{print $1,$2,$3,$4,$5,$10}}' > {output.cnt_short}
-        """
-#+end_src
-- [[file:./workflow/scripts/frag_window_int.sh][Base script]]
-  #+begin_src :tangle ./workflow/scripts/frag_window_int.sh
-# Snakemake variables
-# Function
-# Run command
 #+end_src
 *** INPROCESS Make normalized frag counts                               :smk:
 :PROPERTIES:
