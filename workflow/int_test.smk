@@ -19,5 +19,7 @@ rule all:
         expand(cfdna_wgs_frag_beds      + "/{library_id}_frag_sampled.bed", library_id = LIBRARIES),
         expand(cfdna_wgs_frag_len      + "/{library_id}_norm_short.bed", library_id = LIBRARIES),
         expand(cfdna_wgs_frag_cnt + "/{library_id}_cnt_long.bed", library_id = LIBRARIES),
+        expand(cfdna_wgs_frag_cnt + "/{library_id}_cnt_short.tmp", library_id = LIBRARIES),
+        config["dir"]["data"]["cfdna_wgs"] + "/frag_counts.tsv",
 
 include: config["dir"]["repo"]["cfdna_wgs"] + "/workflow/frag_bed.smk"

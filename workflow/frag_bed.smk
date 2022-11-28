@@ -130,19 +130,33 @@ rule frag_window_int:
         short = cfdna_wgs_frag_len + "/{library_id}_norm_short.bed",
         long = cfdna_wgs_frag_len + "/{library_id}_norm_long.bed",
         matbed = "test/inputs/keep.bed",
+    params:
+        script = config["dir"]["scripts"]["cfdna_wgs"] + "/frag_window_int.sh",
     output:
-        cnt_long_tmp = temp(cfdna_wgs_frag_cnt + "/{library_id}_cnt_long.tmp"),
-        cnt_short_tmp = temp(cfdna_wgs_frag_cnt + "/{library_id}_cnt_short.tmp"),
-        cnt_long = cfdna_wgs_frag_cnt + "/{library_id}_cnt_long.bed",
-        cnt_short = cfdna_wgs_frag_cnt + "/{library_id}_cnt_short.bed",
+        long = cfdna_wgs_frag_cnt + "/{library_id}_cnt_long.tmp",
+        short = cfdna_wgs_frag_cnt + "/{library_id}_cnt_short.tmp",
     shell:
         """
-        bedtools intersect -c -a {input.matbed} -b {input.long} > {output.cnt_long_tmp}
-        awk '{{print FILENAME (NF?"\t":"") $0}}' {output.cnt_long_tmp} |
-        sed 's/^.*lib/lib/g' |
-        sed 's/_.*tmp//g' > {output.cnt_long}
-        bedtools intersect -c -a {input.matbed} -b {input.short} > {output.cnt_short_tmp}
-        awk '{{print FILENAME (NF?"\t":"") $0}}' {output.cnt_short_tmp} |
-        sed 's/^.*lib/lib/g' |
-        sed 's/_.*tmp//g' > {output.cnt_short}
+        {params.script} \
+        {input.short} \
+        {input.matbed} \
+        {output.short}
+        {params.script} \
+        {input.long} \
+        {input.matbed} \
+        {output.long}
+        """
+
+rule count_merge:
+    input:
+        expand(cfdna_wgs_frag_cnt + "/{library_id}_cnt_{len}.tmp", library_id = LIBRARIES, len = ["short", "long"]),
+    output:
+        config["dir"]["data"]["cfdna_wgs"] + "/frag_counts.tsv",
+    params:
+        script = config["dir"]["scripts"]["cfdna_wgs"] + "/count_merge.sh"
+    shell:
+        """
+        {params.script} \
+	"{input}" \
+        {output}
         """
